@@ -547,23 +547,39 @@
 
 
         function setupEventListeners() {
-            document.getElementById('audio-control').addEventListener('click', toggleAudio);
-            document.getElementById('radar-control').addEventListener('click', toggleRadar);
-            document.getElementById('location-selector').addEventListener('change', (e) => changeLocation(e.target.value));
-            
-            // Handle map clicks (The "Deselect & Recenter" Logic)
-            state.map.on('click', (e) => {
-                // If the click target is a marker icon, ignore the click (let the marker's own click handler run)
-                if (e.originalEvent.target.closest('.leaflet-marker-icon')) return;
-                
-                hideInfoBox();
-                
-                // If a marker was previously selected, fly the map back to the default city view
-                if (state.isFollowing || state.selectedItem) {
-                    recenterView();
-                }
-            });
+    document.getElementById('audio-control').addEventListener('click', toggleAudio);
+    document.getElementById('radar-control').addEventListener('click', toggleRadar);
+    document.getElementById('location-selector').addEventListener('change', (e) => changeLocation(e.target.value));
+    
+    // Handle map clicks
+    state.map.on('click', (e) => {
+        // 1. Ignore clicks on markers (let the marker's own handler work)
+        if (e.originalEvent.target.closest('.leaflet-marker-icon')) return;
+        
+        // 2. Capture the state BEFORE we hide the box
+        const wasFollowing = state.isFollowing || state.selectedItem;
+
+        // 3. Now hide the box (which clears state.isFollowing)
+        hideInfoBox();
+        
+        // 4. Use the CAPTURED variable to decide if we recenter
+        if (wasFollowing) {
+            recenterView();
         }
+
+        // 5. AUDIO FIX: Attempt to unlock audio on this interaction
+        // (Browsers block autoplay; this forces it on the first map interaction)
+        if (state.audioElement.paused) {
+            state.audioElement.muted = false;
+            state.audioElement.play()
+                .then(() => {
+                    document.getElementById('audio-control').classList.add('playing');
+                    document.getElementById('audio-text').textContent = 'ATC LIVE';
+                })
+                .catch((err) => { /* console.log('Audio waiting for interaction'); */ });
+        }
+    });
+}
 
         // =========================================================================
         // LOCATION AND UI CONTROL
