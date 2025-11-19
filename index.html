@@ -448,7 +448,7 @@
         // GLOBAL STATE & LAYERS
         // =========================================================================
         const state = {
-            location: 'SEA',
+            location: 'JFK',
             map: null,
             isRadarOn: true,       // <--- MODIFICATION 1: Set default state to true
             selectedItem: null, 
@@ -501,7 +501,6 @@
             // Start the clock and audio
             updateClock();
             setInterval(updateClock, 1000);
-            autoStartAudio();
         }
 
         function initMap() {
@@ -1037,13 +1036,12 @@
         }
 
         function autoStartAudio() {
-            // Attempts to play audio automatically (muted) upon load to satisfy browser requirements
             state.audioElement.src = CONFIG.LOCATIONS[state.location].audio;
             state.audioElement.muted = true;
             
             state.audioElement.play().then(() => {
                 setTimeout(() => { 
-                    state.audioElement.muted = false; // Unmute shortly after successful play
+                    state.audioElement.muted = false;
                     document.getElementById('audio-text').textContent = 'ATC LIVE';
                 }, 500);
                 document.getElementById('audio-control').classList.add('playing');
