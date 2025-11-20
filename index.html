@@ -848,7 +848,8 @@
                 RADAR: 'https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/nexrad-n0q-900913/{z}/{x}/{y}.png',
                 SHIPS: 'wss://ports-production-8906.up.railway.app',
                 SEATTLE_911: 'https://data.seattle.gov/resource/grwu-wqtk.json',
-                ADSB: (lat, lon) => `https://api.airplanes.live/v2/point/${lat}/${lon}/50`
+                ADSB: (lat, lon) => `https://api.airplanes.live/v2/point/${lat}/${lon}/50`,
+                AWS_PROXY: 'https://yd7ndqoiq5.execute-api.us-east-1.amazonaws.com/prod/'
             },
             PATHS: {
                 PLANE: "M21,16v-2l-8-5V3.5C13,2.67,12.33,2,11.5,2S10,2.67,10,3.5V9l-8,5v2l8-2.5V19l-2,1.5V22l3.5-1l3.5,1v-1.5L13,19v-5.5L21,16z",
@@ -858,7 +859,7 @@
                 JFK: { name: 'JFK', lat: 40.6413, lon: -73.7781, zoom: 11, audio: 'https://d.liveatc.net/kjfk9_s', bbox: [[40.4, -74.3], [40.9, -73.7]] },
                 SEA: { name: 'SEA', lat: 47.4502, lon: -122.3088, viewLat: 47.6062, viewLon: -122.3321, zoom: 10, audio: 'https://d.liveatc.net/ksea3_gnd', bbox: [[47.4, -122.5], [47.8, -122.2]] },
                 DC: { name: 'IAD/DCA', lat: 38.8977, lon: -77.0365, zoom: 10, audio: 'https://d.liveatc.net/kiad1_1', bbox: [[38.5, -77.5], [39.2, -76.3]] },
-				ATL: { name: 'ATL', lat: 33.6407, lon: -84.4277, zoom: 11, audio: 'https://d.liveatc.net/katl_twr', bbox: [[33.5, -84.6], [33.8, -84.2]] },
+                ATL: { name: 'ATL', lat: 33.6407, lon: -84.4277, zoom: 11, audio: 'https://d.liveatc.net/katl_twr', bbox: [[33.5, -84.6], [33.8, -84.2]] },
                 MIA: { name: 'MIA', lat: 25.7959, lon: -80.2870, zoom: 11, audio: 'https://d.liveatc.net/kmia3_gnd', bbox: [[25.7, -80.3], [25.9, -80.1]] },
                 DEN: { name: 'DEN', lat: 39.8561, lon: -104.6737, zoom: 11, audio: 'https://d.liveatc.net/kden1_6', bbox: [[39.8, -104.8], [40.0, -104.5]] },
                 ORD: { name: 'ORD', lat: 41.9742, lon: -87.9073, zoom: 11, audio: 'https://d.liveatc.net/kord1n2_app_133625', bbox: [[41.8, -87.6], [42.0, -87.5]] },
@@ -876,7 +877,6 @@
                 SHIP: '#4a7c59'
             }
         };
-
         // --- DATA DICTIONARY ---
         const AIRCRAFT_TYPES = {
             "B737": "Boeing 737-700", "B738": "Boeing 737-800", "B739": "Boeing 737-900", "B38M": "Boeing 737 MAX 8", "B39M": "Boeing 737 MAX 9",
@@ -1153,14 +1153,14 @@ function setupCustomDropdown() {
         
         function createHudIcon(t,r,c,h,p=CONFIG.PATHS.PLANE) { const html=h?`<span style="color:${c};transform:rotate(${r}deg);display:inline-block;font-size:24px; text-shadow:0 1px 2px rgba(0,0,0,0.5);">&infin;</span>`:`<svg width="24" height="24" viewBox="0 0 24 24" style="transform:rotate(${r}deg);filter:drop-shadow(0 1px 2px rgba(0,0,0,0.5));"><path fill="${c}" d="${p}"/></svg>`; return L.divIcon({className:'marker-icon', html, iconSize:[24,24], iconAnchor:[12,12]}); }
         function updateTrailLine(m,i,t,c) { if(t.length<2)return; if(m.has(i)) m.get(i).setLatLngs(t).setStyle({color:c, opacity:0.5, weight:2}); else m.set(i, L.polyline(t,{color:c, opacity:0.5, weight:2}).addTo(state.map)); }
-// --- ROUTE FETCHING LOGIC (ADSBDB.COM) ---
+// --- ROUTE FETCHING (AWS LAMBDA PROXY) ---
 const routeCache = new Map();
 
 async function fetchRoute(callsign) {
     const depEl = document.getElementById('ac-route-dep');
     const arrEl = document.getElementById('ac-route-arr');
 
-    // Reset UI to loading state
+    // 1. Reset UI
     depEl.textContent = "???";
     arrEl.textContent = "???";
     depEl.style.opacity = "0.5";
@@ -1168,22 +1168,30 @@ async function fetchRoute(callsign) {
 
     if (!callsign) return;
 
-    // Check Cache
+    // 2. Check Cache
     if (routeCache.has(callsign)) {
         const data = routeCache.get(callsign);
         updateRouteUI(data.dep, data.arr);
         return;
     }
 
-    // Fetch from ADSBDB (Free/HTTPS)
+    // 3. Fetch from YOUR AWS Lambda
     try {
-        const res = await fetch(`https://api.adsbdb.com/v0/callsign/${callsign}`);
+        // We send the callsign to your Lambda, which handles the rest
+        const url = `${CONFIG.URLS.AWS_PROXY}?callsign=${callsign.trim()}`;
+        
+        const res = await fetch(url);
+        
+        if (!res.ok) throw new Error("AWS/API Error");
+
         const json = await res.json();
 
-        if (json.response && json.response.flightroute) {
-            const route = json.response.flightroute;
-            const dep = route.origin.iata_code || route.origin.icao_code || "UNK";
-            const arr = route.destination.iata_code || route.destination.icao_code || "UNK";
+        // The Lambda returns the exact JSON FlightAware gave it
+        if (json.flights && json.flights.length > 0) {
+            let flight = json.flights.find(f => !f.actual_on) || json.flights[0];
+
+            const dep = flight.origin ? flight.origin.code_iata : "UNK";
+            const arr = flight.destination ? flight.destination.code_iata : "UNK";
             
             routeCache.set(callsign, { dep, arr });
             updateRouteUI(dep, arr);
@@ -1191,11 +1199,10 @@ async function fetchRoute(callsign) {
             updateRouteUI("N/A", "N/A");
         }
     } catch (e) {
-        console.log("Route fetch failed", e);
+        console.warn("Route Fetch Error:", e);
         updateRouteUI("ERR", "ERR");
     }
 }
-
 function updateRouteUI(dep, arr) {
     const depEl = document.getElementById('ac-route-dep');
     const arrEl = document.getElementById('ac-route-arr');
@@ -1205,7 +1212,6 @@ function updateRouteUI(dep, arr) {
     depEl.style.opacity = "1";
     arrEl.style.opacity = "1";
 }
-
 
         function showInfo(type, data) {
             state.selectedItem = data.hex || data.mmsi || data.incident_number; state.isFollowing = true;
